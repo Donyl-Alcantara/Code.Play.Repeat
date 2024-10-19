@@ -42,13 +42,13 @@ class Game:
 
         # Load sounds
         pygame.mixer.init()
-        self.catch_sound = pygame.mixer.Sound(join('islaintragame','audio',"jumpscare.wav"))
+        self.catch_sound = pygame.mixer.Sound(join('audio',"jumpscare.wav"))
 
         # Load images
-        self.win_img = pygame.image.load(join('islaintragame','win.png'))
+        self.win_img = pygame.image.load(join('win.png'))
 
         # Load gif frames for jumpscare
-        self.caught_frames = self.load_gif_frames(join('islaintragame',"fnaf-jrs.gif"), scale=2.5)
+        self.caught_frames = self.load_gif_frames(join("fnaf-jrs.gif"), scale=2.5)
         self.caught_animation = AnimatedSprite(self.caught_frames, 0, 0, scale=2.5)
 
     def load_gif_frames(self, gif_path, scale=1):

@@ -2,7 +2,7 @@ from settings import *
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos, groups, collisions, collectibles):
         super().__init__(groups)
-        self.image = pygame.image.load(join('islaintragame','img', 'player', 'adventurer-idle-00.png')).convert_alpha()
+        self.image = pygame.image.load(join('img', 'player', 'adventurer-idle-00.png')).convert_alpha()
         self.rect = self.image.get_rect(center = pos)
         self.hitbox_rect = self.rect.inflate(-30, 0)
         self.hitbox_rect.center = self.rect.center
