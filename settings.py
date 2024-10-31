@@ -1,6 +1,5 @@
 import pygame
 from os import walk
-from os.path import join
 
 # System
 WIDTH, HEIGHT = 1280, 720
