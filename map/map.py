@@ -12,11 +12,11 @@ pygame.mixer.init()
 
 # Set up the display
 screen_width, screen_height = 1280, 720
-screen = pygame.display.set_mode((screen_width, screen_height), pygame.RESIZABLE | pygame.DOUBLEBUF)
+screen = pygame.display.set_mode((screen_width, screen_height))#, pygame.RESIZABLE | pygame.DOUBLEBUF)
 pygame.display.set_caption("Interactive Philippines Map")
 
 # Colors
-SEA_COLOR = (49, 191, 186)
+SEA_COLOR = (53, 180, 186, 255)
 LAND_COLOR = (124, 252, 0)
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
@@ -103,13 +103,15 @@ class Map:
         self.locations = locations
         self.offset = Vector2(0, 0)
         self.zoom = 1.0
+        self.min_zoom = 1.0  # Ensures map always fills screen width
+        self.max_zoom = 3.0  # Maximum zoom level
         self.dragging = False
         self.drag_start = Vector2(0, 0)
         self.selected_location = None
         self.hover_location = None
         self.show_all_names = False
         self.stars = [Star((random.randint(0, screen_width), random.randint(0, screen_height // 2))) for _ in range(100)]
-        self.time = 12  # Start at noon
+        self.time = 12
         self.particles = []
         self.mini_game = None
         self.show_instructions = False
@@ -192,18 +194,22 @@ class Map:
             return int(255 * (self.time - 18) / 6)
 
     def draw_marker(self, screen, pos, name):
-        # Draw shadow
-        shadow_surf = pygame.Surface((30, 30), pygame.SRCALPHA)
-        pygame.gfxdraw.filled_circle(shadow_surf, 15, 15, 15, SHADOW_COLOR)
-        screen.blit(shadow_surf, (pos.x - 15, pos.y - 5))
+    # Draw shadow (made smaller)
+        shadow_surf = pygame.Surface((20, 20), pygame.SRCALPHA)  # Reduced from 30 to 20
+        pygame.gfxdraw.filled_circle(shadow_surf, 10, 10, 10, SHADOW_COLOR)  # Radius reduced from 15 to 10
+        screen.blit(shadow_surf, (pos.x - 10, pos.y - 3))  # Adjusted position
 
         # Draw pin
         color = BLUE if name == self.selected_location else (GREEN if name == self.hover_location else RED)
-        pygame.gfxdraw.filled_trigon(screen, int(pos.x), int(pos.y - 20), int(pos.x - 10), int(pos.y), int(pos.x + 10), int(pos.y), color)
-        pygame.gfxdraw.aacircle(screen, int(pos.x), int(pos.y - 20), 10, color)
-        pygame.gfxdraw.filled_circle(screen, int(pos.x), int(pos.y - 20), 10, color)
-        pygame.gfxdraw.aacircle(screen, int(pos.x), int(pos.y - 20), 5, WHITE)
-        pygame.gfxdraw.filled_circle(screen, int(pos.x), int(pos.y - 20), 5, WHITE)
+        pygame.gfxdraw.filled_trigon(screen, 
+        int(pos.x), int(pos.y - 15),     # Top point (moved up less)
+        int(pos.x - 7), int(pos.y),      # Left point (reduced from -10 to -7)
+        int(pos.x + 7), int(pos.y),      # Right point (reduced from 10 to 7)
+        color)
+        pygame.gfxdraw.aacircle(screen, int(pos.x), int(pos.y - 15), 7, color)        # Radius reduced from 10 to 7
+        pygame.gfxdraw.filled_circle(screen, int(pos.x), int(pos.y - 15), 7, color)   # Radius reduced from 10 to 7
+        pygame.gfxdraw.aacircle(screen, int(pos.x), int(pos.y - 15), 3, WHITE)        # Radius reduced from 5 to 3
+        pygame.gfxdraw.filled_circle(screen, int(pos.x), int(pos.y - 15), 3, WHITE)   # Radius reduced from 5 to 3
 
     def draw_name_label(self, screen, name, pos):
         label = small_font.render(name, True, BLACK, WHITE)
@@ -330,7 +336,7 @@ class Map:
     def check_click(self, pos, map_pos, map_size):
         for name, data in self.locations.items():
             pixel_pos = map_pos + Vector2(data['x'] * map_size.x, data['y'] * map_size.y)
-            if (Vector2(pos) - pixel_pos).length_squared() < 400:  # 20px radius
+            if (Vector2(pos) - pixel_pos).length_squared() < 225:  # Reduced from 400 to 225 (15px radius instead of 20px)
                 return name
         return None
 
@@ -441,8 +447,8 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.VIDEORESIZE:
-                screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE | pygame.DOUBLEBUF)
+            #elif event.type == pygame.VIDEORESIZE:
+            #    screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE | pygame.DOUBLEBUF)
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 running = False
             

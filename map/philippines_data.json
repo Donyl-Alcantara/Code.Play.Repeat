@@ -1,31 +1,31 @@
 {
   "Manila": {
-    "x": 0.43,
+    "x": 0.47,
     "y": 0.36,
     "population": 1780000,
     "description": "Capital city of the Philippines"
   },
   "Cebu": {
-    "x": 0.60,
-    "y": 0.60,
+    "x": 0.55,
+    "y": 0.62,
     "population": 922611,
     "description": "Queen City of the South"
   },
   "Ifugao": {
-    "x": 0.44,
+    "x": 0.46,
     "y": 0.25,
     "population": 202802,
     "description": "Famous for its rice terraces"
   },
   "Palawan": {
-    "x": 0.25,
+    "x": 0.36,
     "y": 0.70,
     "population": 849469,
     "description": "Known for beautiful beaches"
   },
   "Davao": {
-    "x": 0.70,
-    "y": 0.80,
+    "x": 0.61,
+    "y": 0.83,
     "population": 1632991,
     "description": "Largest city in Mindanao"
   }
