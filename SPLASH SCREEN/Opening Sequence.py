@@ -2,40 +2,7 @@ import pygame
 import sys
 import time
 import math
-import random
 from pygame import gfxdraw  # For anti-aliased rendering
-
-class SmoothParticle:
-    def __init__(self, x, y, color=(255, 255, 255)):
-        self.x = x
-        self.y = y
-        self.orig_x = x
-        self.orig_y = y
-        self.color = color
-        self.size = random.uniform(1.5, 4.0)
-        self.life = 1.0
-        self.fade_speed = random.uniform(0.002, 0.008)
-        self.angle = random.uniform(0, 2 * math.pi)
-        self.speed = random.uniform(0.2, 0.8)
-        self.sin_offset = random.uniform(0, 2 * math.pi)
-        self.sin_speed = random.uniform(0.02, 0.05)
-
-    def update(self):
-        self.life -= self.fade_speed
-        self.x += math.cos(self.angle) * self.speed
-        self.y += math.sin(self.angle) * self.speed
-        # Add subtle floating motion
-        self.y += math.sin(self.sin_offset + time.time() * self.sin_speed) * 0.5
-        return self.life > 0
-
-    def draw(self, screen):
-        if self.life > 0:
-            alpha = int(self.life * 255)
-            radius = self.size * (0.8 + 0.2 * math.sin(time.time() * 2 + self.sin_offset))
-            gfxdraw.filled_circle(screen, int(self.x), int(self.y), int(radius),
-                                (*self.color, alpha))
-            gfxdraw.aacircle(screen, int(self.x), int(self.y), int(radius),
-                            (*self.color, alpha))
 
 class PremiumSplashScreen:
     def __init__(self):
@@ -47,27 +14,28 @@ class PremiumSplashScreen:
         self.clock = pygame.time.Clock()
         
         self.background = (0, 0, 0)
-        self.particles = []
         
         try:
             # Load and prepare images with smooth scaling
             self.pygame_logo = pygame.image.load("pygame_powered.png").convert_alpha()
-            self.dev_logo = pygame.image.load("Logo.png").convert_alpha()
+            self.dev_logo = pygame.image.load("Logo2.png").convert_alpha()
             
             # Calculate optimal sizes while maintaining aspect ratios
             pygame_aspect = self.pygame_logo.get_width() / self.pygame_logo.get_height()
             dev_aspect = self.dev_logo.get_width() / self.dev_logo.get_height()
             
-            base_height = 200
+            # Different base heights for each logo
+            pygame_base_height = 200  # Keep Pygame logo the same size
+            dev_base_height = 500     # Increased size for Logo2
             
             # Create high-quality scaled versions
             self.pygame_logo_orig = self.smooth_scale(
                 self.pygame_logo,
-                (int(base_height * pygame_aspect), base_height)
+                (int(pygame_base_height * pygame_aspect), pygame_base_height)
             )
             self.dev_logo_orig = self.smooth_scale(
                 self.dev_logo,
-                (int(base_height * dev_aspect), base_height)
+                (int(dev_base_height * dev_aspect), dev_base_height)
             )
             
         except pygame.error as e:
@@ -87,17 +55,6 @@ class PremiumSplashScreen:
             current = pygame.transform.smoothscale(current, (current_w, current_h))
         
         return pygame.transform.smoothscale(current, size)
-
-    def create_particles(self, x, y, amount=3):
-        for _ in range(amount):
-            self.particles.append(SmoothParticle(x, y))
-
-    def update_particles(self):
-        self.particles = [p for p in self.particles if p.update()]
-
-    def draw_particles(self):
-        for particle in self.particles:
-            particle.draw(self.screen)
 
     def smooth_step(self, x):
         """Smoother step function for ultra-smooth transitions"""
@@ -122,9 +79,15 @@ class PremiumSplashScreen:
     def display_logo(self, logo, is_final=False):
         start_time = time.time()
         
-        # Refined animation timings
-        zoom_in_duration = 2.5  # Slower, more elegant zoom
-        hold_duration = 1.8
+        # Modified animation timings
+        zoom_in_duration = 2.5  # Slower zoom in
+        
+        # Adjust hold durations based on whether it's the final logo
+        if is_final:
+            hold_duration = 3.0  # Updated hold duration for Logo2
+        else:
+            hold_duration = 1.8  # Original hold duration for Pygame logo
+            
         fade_out_duration = 1.2
         total_duration = zoom_in_duration + hold_duration + fade_out_duration
         
@@ -141,12 +104,12 @@ class PremiumSplashScreen:
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:  # Skip animation with spacebar
+                        if not is_final:
+                            return
             
             self.screen.fill(self.background)
-            
-            # Update and draw particles
-            self.update_particles()
-            self.draw_particles()
             
             if current_time < zoom_in_duration:
                 # Ultra-smooth zoom in
@@ -164,23 +127,11 @@ class PremiumSplashScreen:
                 last_rotation = rotation
                 
                 alpha = int(255 * min(1, progress * 2))
-                
-                # Create particles during zoom
-                if random.random() < 0.4:
-                    x = self.screen_width // 2 + random.randint(-100, 100)
-                    y = self.screen_height // 2 + random.randint(-100, 100)
-                    self.create_particles(x, y, 1)
                     
             elif current_time < (zoom_in_duration + hold_duration):
                 scale = 1.0
                 rotation = 0
                 alpha = 255
-                
-                # Subtle particles during hold
-                if random.random() < 0.2:
-                    x = self.screen_width // 2 + random.randint(-150, 150)
-                    y = self.screen_height // 2 + random.randint(-150, 150)
-                    self.create_particles(x, y, 1)
                     
             else:
                 fade_progress = (current_time - (zoom_in_duration + hold_duration)) / fade_out_duration

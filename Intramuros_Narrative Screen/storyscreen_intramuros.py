@@ -256,7 +256,7 @@ class OpeningSequence:
                  self.font, 
                  "second_terminal.wav"),
             
-            Scene("third_outside.png",
+            Scene("third_outside.png",  
                  "Armed with curiosity and a map, your first stop is a place steeped in history and mystery: Intramuros, the Walled City.",
                  self.font,
                  "third_street.wav"),
