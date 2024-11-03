@@ -33,6 +33,7 @@ class LoadingScreen:
         self.bar_width = 300
         self.bar_height = 20
         self.border_thickness = 4
+        self.corner_radius = 10  # Radius for rounded corners
         
         # Position loading bar in center screen
         self.bar_x = (1280 - self.bar_width) // 2
@@ -61,7 +62,29 @@ class LoadingScreen:
         self.tagalog_alpha = 0
         self.tagalog_fade_in = True
         self.fade_speed = 5
+
+    def draw_rounded_rect(self, surface, color, rect, radius):
+        """Draw a rounded rectangle"""
+        x, y, width, height = rect
         
+        # Create temporary surface for anti-aliasing
+        temp_surface = pygame.Surface((width, height), pygame.SRCALPHA)
+        
+        # Draw the main rectangles
+        pygame.draw.rect(temp_surface, color, 
+                        (radius, 0, width - 2 * radius, height))
+        pygame.draw.rect(temp_surface, color,
+                        (0, radius, width, height - 2 * radius))
+        
+        # Draw the four corner circles
+        pygame.draw.circle(temp_surface, color, (radius, radius), radius)
+        pygame.draw.circle(temp_surface, color, (width - radius, radius), radius)
+        pygame.draw.circle(temp_surface, color, (radius, height - radius), radius)
+        pygame.draw.circle(temp_surface, color, (width - radius, height - radius), radius)
+        
+        # Blit the temporary surface onto the main surface
+        surface.blit(temp_surface, (x, y))
+    
     def update(self, progress: float):
         self.progress = progress
         self.anim_counter += 1
@@ -103,39 +126,28 @@ class LoadingScreen:
         tagalog_rect = tagalog_text.get_rect(centerx=640, top=self.bar_y + 60)
         self.screen.blit(tagalog_text, tagalog_rect)
         
-        # Draw loading bar border
-        pygame.draw.rect(self.screen, self.border_color,
-                        (self.bar_x - self.border_thickness,
-                         self.bar_y - self.border_thickness,
-                         self.bar_width + (self.border_thickness * 2),
-                         self.bar_height + (self.border_thickness * 2)))
+        # Draw loading bar border (rounded)
+        border_rect = (self.bar_x - self.border_thickness,
+                      self.bar_y - self.border_thickness,
+                      self.bar_width + (self.border_thickness * 2),
+                      self.bar_height + (self.border_thickness * 2))
+        self.draw_rounded_rect(self.screen, self.border_color, border_rect, self.corner_radius)
         
-        # Draw loading bar background
-        pygame.draw.rect(self.screen, self.bg_color,
-                        (self.bar_x, self.bar_y,
-                         self.bar_width, self.bar_height))
+        # Draw loading bar background (rounded)
+        bg_rect = (self.bar_x, self.bar_y, self.bar_width, self.bar_height)
+        self.draw_rounded_rect(self.screen, self.bg_color, bg_rect, self.corner_radius - self.border_thickness)
         
-        # Draw loading bar progress
+        # Draw loading bar progress (rounded)
         progress_width = int(self.bar_width * self.progress)
         if progress_width > 0:
-            pygame.draw.rect(self.screen, self.fill_color,
-                           (self.bar_x, self.bar_y,
-                            progress_width, self.bar_height))
-            
-        # Draw pixel corners
-        corner_size = 2
-        corners = [
-            (self.bar_x - self.border_thickness, self.bar_y - self.border_thickness),  # Top left
-            (self.bar_x + self.bar_width + self.border_thickness - corner_size, self.bar_y - self.border_thickness),  # Top right
-            (self.bar_x - self.border_thickness, self.bar_y + self.bar_height + self.border_thickness - corner_size),  # Bottom left
-            (self.bar_x + self.bar_width + self.border_thickness - corner_size, 
-             self.bar_y + self.bar_height + self.border_thickness - corner_size)  # Bottom right
-        ]
-        
-        for corner in corners:
-            pygame.draw.rect(self.screen, self.text_color,
-                           (corner[0], corner[1], corner_size, corner_size))
-
+            progress_rect = (self.bar_x, self.bar_y, progress_width, self.bar_height)
+            if progress_width < self.bar_width:
+                self.draw_rounded_rect(self.screen, self.fill_color, progress_rect, 
+                                     min(self.corner_radius - self.border_thickness, progress_width // 2))
+            else:
+                self.draw_rounded_rect(self.screen, self.fill_color, progress_rect, 
+                                     self.corner_radius - self.border_thickness)
+                
 class AssetLoader:
     @staticmethod
     def load_image(path):
@@ -443,7 +455,7 @@ class OpeningSequence:
                  "audio/tenth_humming.wav",
                  is_final_scene=True)
         ]
-
+    
     def _preload_assets(self):
         total_assets = len(self.scenes)
         assets_loaded = 0
@@ -576,4 +588,4 @@ def main():
     sequence.run()
 
 if __name__ == "__main__":
-    main()  
+    main()
