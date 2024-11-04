@@ -5,20 +5,49 @@ from settings import *
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos, groups, collisions, collectibles):
         super().__init__(groups)
-        self.image = pygame.image.load('img//player//adventurer-idle-00.png').convert_alpha() # replace w animated sprite
+        # Draw player sprites
+        self.animation = SpriteSheet(self)
+        self.animation.add_animation('idle', 'img//player//idle.png', 12)
+        self.animation.add_animation('run', 'img//player//run.png', 12)
+
+        # Draw player rect
         self.rect = self.image.get_rect(center = pos)
-        self.hitbox_rect = self.rect.inflate(-30, 0)
+        self.hitbox_rect = self.rect.inflate(-10, 0)
         self.hitbox_rect.center = self.rect.center
 
         # Movement
         self.pos = pygame.math.Vector2(self.hitbox_rect.center)
         self.direction = pygame.Vector2()
-        self.speed = 150
+        self.base_speed = 120
+        self.speed = self.base_speed
         self.can_move = False
+
+        # Sprint mechanics
+        self.sprint_multiplier = 1.4  # Sprint is 1.6x normal speed
+        self.is_sprinting = False
+        self.stamina = 100  # Max stamina
+        self.current_stamina = self.stamina
+        self.stamina_drain_rate = 20  # Stamina points drained per second while sprinting
+        self.stamina_regen_rate = 5  # Stamina points regenerated per second while not sprinting
+        self.stamina_regen_delay = 0.5  # Seconds to wait before regenerating stamina
+        self.stamina_regen_timer = 0  # Timer to track delay before regeneration
 
         # Object interaction
         self.collision_sprites = collisions
         self.collectible_sprites = collectibles
+
+    def update_animation_state(self):
+        # Determine which animation to play based on movement
+        if self.direction.magnitude() == 0:
+            self.animation.set_animation('idle', 5)
+        else:
+            self.animation.set_animation('run', 15 if self.is_sprinting else 10)
+
+        # Update facing direction
+        if self.direction.x > 0:
+            self.animation.facing_right = True
+        elif self.direction.x < 0:
+            self.animation.facing_right = False
 
     # Movement input
     def input(self):
@@ -45,6 +74,26 @@ class Player(pygame.sprite.Sprite):
         # Update the main rect to follow the hitbox
         self.rect.center = self.hitbox_rect.center
 
+    def sprint(self, dt):
+        keys = pygame.key.get_pressed()
+
+        # Check for sprint input and sufficient stamina
+        if keys[pygame.K_LSHIFT] and self.current_stamina > 0:
+            self.is_sprinting = True
+            self.speed = self.base_speed * self.sprint_multiplier
+            # Drain stamina while sprinting
+            self.current_stamina = max(0, self.current_stamina - self.stamina_drain_rate * dt)
+            self.stamina_regen_timer = 0
+        else:
+            self.is_sprinting = False
+            self.speed = self.base_speed
+
+            # Handle stamina regeneration
+            if not self.is_sprinting:
+                self.stamina_regen_timer += dt
+                if self.stamina_regen_timer >= self.stamina_regen_delay:
+                    self.current_stamina = min(self.stamina, self.current_stamina + self.stamina_regen_rate * dt)
+
     # Player collision detection
     def collision(self, direction):
         for sprite in self.collision_sprites:
@@ -66,24 +115,53 @@ class Player(pygame.sprite.Sprite):
         collected = pygame.sprite.spritecollide(self, self.collectible_sprites, True)
         return len(collected)
 
+    def draw_stamina_bar(self, screen):
+        # Bar dimensions and position
+        bar_width = 280
+        bar_height = 20
+        x = 10
+        y = 40  # Position below score display
+
+        # Draw background (empty bar)
+        pygame.draw.rect(screen, (64, 64, 64), (x, y, bar_width, bar_height))
+
+        # Draw stamina level
+        stamina_width = (self.current_stamina / self.stamina) * bar_width
+        stamina_color = (0, 255, 0) if not self.is_sprinting else (
+        255, 165, 0)  # Green when normal, orange when sprinting
+        pygame.draw.rect(screen, stamina_color, (x, y, stamina_width, bar_height))
+
+        # Draw border
+        pygame.draw.rect(screen, WHITE, (x, y, bar_width, bar_height), 2)
+
     def update(self, dt):
-        if self.can_move:  # Only process movement if allowed
+        if self.can_move:
             self.input()
             self.move(dt)
+            self.sprint(dt)
+        self.update_animation_state()
+        self.animation.animate(dt)
         return self.hitbox_rect.center
 
 class Ghost(pygame.sprite.Sprite):
     def __init__(self, pos, groups, player, collisions):
         super().__init__(groups)
-        self.image = pygame.Surface((30, 30))
-        self.image.fill(RED) # replace w animated ghost sprite
+        # Draw ghost sprite
+        self.animation = SpriteSheet(self)
+        self.animation.add_animation('idle', 'img//npcs//idle.png', 1, scale=1)
+        self.animation.add_animation('moving', 'img//npcs//moving.png', 5, scale=1)
+        self.animation.set_animation('idle', 5)  # Set default to idle
+
+        # Draw ghost rect
         self.rect = self.image.get_rect(center=pos)
-        self.hitbox_rect = self.rect.inflate(-5, -5)  # Smaller hitbox for smoother collision
+        self.hitbox_rect = self.rect.inflate(-20, 0)
         self.pos = pygame.math.Vector2(self.hitbox_rect.center)
-        self.speed = 100
+
+        self.speed = 200
         self.player = player
         self.collision_sprites = collisions
         self.can_see_player = False
+        self.win_zone_rect = None
 
         # Add movement permission flag
         self.can_move = False
@@ -91,19 +169,18 @@ class Ghost(pygame.sprite.Sprite):
 
         # Chase distance limits
         self.min_chase_distance = 0
-        self.max_chase_distance = 300
+        self.max_chase_distance = 200
 
         # Wandering behavior
-        self.wander_direction = pygame.math.Vector2(1, 0)
+        self.wander_direction = pygame.math.Vector2(random.randint(0,1), random.randint(0,1))
         self.wander_timer = 0
         self.wander_interval = random.randint(2, 3)
         self.is_paused = False
         self.pause_timer = 0
         self.pause_duration = random.randint(0, 2)
-        self.pause_chance = 0.1  # 10% chance to pause when changing direction
+        self.pause_chance = 0.1
         self.min_pause_duration = 1  # Minimum pause duration in seconds
         self.max_pause_duration = 3  # Maximum pause duration in seconds
-
 
     def start_moving(self):
         self.can_move = True
@@ -117,27 +194,24 @@ class Ghost(pygame.sprite.Sprite):
         end = pygame.math.Vector2(self.player.rect.center)
 
         # Calculate distance to player
-        distance_to_player = (end - start).length()
+        distance = (end - start).length()
 
-        # Calculate the ray direction
-        ray_dir = end - start
-        distance = ray_dir.length()
+        # Only check line of sight if within max chase distance
+        if distance > self.max_chase_distance:
+            self.can_see_player = False
+            return False
 
-        if distance == 0:  # If ghost and player are in the same position
-            return True
+        ray_dir = (end - start).normalize()
 
-        ray_dir = ray_dir.normalize()
-
-        # Check for collisions along the ray
-        for i in range(int(distance)):
+        # Check fewer points along the line (step size of 8 instead of 1)
+        for i in range(0, int(distance), 8):
             check_pos = start + ray_dir * i
             check_rect = pygame.Rect(check_pos.x - 1, check_pos.y - 1, 2, 2)
 
-            # Check each collision sprite
-            for sprite in self.collision_sprites:
-                if sprite.rect.colliderect(check_rect):
-                    self.can_see_player = False
-                    return False
+            # Use any() with generator expression instead of list comprehension
+            if any(sprite.rect.colliderect(check_rect) for sprite in self.collision_sprites):
+                self.can_see_player = False
+                return False
 
         self.can_see_player = True
         return True
@@ -180,7 +254,7 @@ class Ghost(pygame.sprite.Sprite):
             self.wander_interval = random.randint(2, 3)  # Randomize next interval
 
         # Move in the wander direction
-        self.pos += self.wander_direction * (self.speed * 0.6) * dt
+        self.pos += self.wander_direction * (self.speed * 0.4) * dt
 
     def collision(self, direction):
         for sprite in self.collision_sprites:
@@ -198,44 +272,95 @@ class Ghost(pygame.sprite.Sprite):
                         self.hitbox_rect.top = sprite.rect.bottom
                     self.pos.y = self.hitbox_rect.centery
 
+    def set_win_zone(self, win_zone):
+        # Method to set the win zone reference
+        self.win_zone_rect = win_zone.rect
+
+    def update_animation_state(self, direction=None):
+        """Update the ghost's animation based on its state and direction"""
+        # If we're not moving (during pause or at start), use idle
+        if self.is_paused or not self.can_move:
+            self.animation.set_animation('idle', 5)
+        else:
+            self.animation.set_animation('moving', 5)
+
+        # Update facing direction based on movement or target direction
+        if direction is not None and direction.length() > 0:
+            self.animation.facing_right = direction.x > 0
+
     def update(self, dt):
-        if not self.can_move:  # Check at the start of update
+        if not self.can_move:  # Stops ghosts from moving at the start of the game
+            self.update_animation_state()
+            self.animation.animate(dt)
             return
 
-        self.old_hitbox = self.hitbox_rect.copy()  # Store the old position
+        # Store the old position
+        self.old_hitbox = self.hitbox_rect.copy()
 
-        # Check if we can see the player
-        can_see = self.check_line_of_sight()
-        distance = self.get_distance_to_player()
+        # Movement direction for animation
+        movement_direction = pygame.math.Vector2(0, 0)
 
-        if can_see and self.min_chase_distance <= distance <= self.max_chase_distance:
-            # Reset pause state when chasing
-            self.is_paused = False
+        # Update animation
+        self.animation.animate(dt)
 
-            # Chase the player
-            direction = pygame.math.Vector2(self.player.rect.center) - self.pos
-            if direction.length() > 0:
-                direction = direction.normalize()
-                self.pos += direction * self.speed * dt
+        # Calculate distance to win zone
+        if self.win_zone_rect:
+            win_zone_center = pygame.math.Vector2(self.win_zone_rect.center)
+            ghost_pos = pygame.math.Vector2(self.pos)
+            to_win_zone = win_zone_center - ghost_pos
+            dist_to_win_zone = to_win_zone.length()
 
-            # Draw chase radius (for debugging)
-            screen = pygame.display.get_surface()
-            camera_offset = AllSprites().offset
-            ghost_screen_pos = self.rect.center + camera_offset
+            # If too close to win zone, move away
+            if dist_to_win_zone < 25:  # Buffer distance from win zone
+                if to_win_zone.length() > 0:
+                    direction = -to_win_zone.normalize()  # Move away from win zone
+                    self.pos += direction * self.speed * 0.5 * dt
+                    movement_direction = direction
+                self.update_animation_state(movement_direction)
+                self.animation.animate(dt)
+                return  # Skip normal movement logic
 
-            # Draw detection ranges (comment out these lines to hide them)
-            pygame.draw.circle(screen, (255, 0, 0, 128), ghost_screen_pos, self.min_chase_distance, 1)  # Min range
-            pygame.draw.circle(screen, (255, 255, 0, 128), ghost_screen_pos, self.max_chase_distance, 1)  # Max range
-
-            # Draw line of sight
-            pygame.draw.line(screen,
-                             RED,
-                             ghost_screen_pos,
-                             self.player.rect.center + camera_offset,
-                             2)
-        else:
-            # Wander around if can't see player
+        if self.win_zone_rect and self.win_zone_rect.colliderect(self.player.rect):
             self.wander(dt)
+            self.update_animation_state(self.wander_direction)
+        else:
+            # Check if we can see the player
+            can_see = self.check_line_of_sight()
+            distance = self.get_distance_to_player()
+
+            if can_see and self.min_chase_distance <= distance <= self.max_chase_distance:
+                # Reset pause state when chasing
+                self.is_paused = False
+
+                # Chase the player
+                direction = pygame.math.Vector2(self.player.rect.center) - self.pos
+                if direction.length() > 0:
+                    direction = direction.normalize()
+                    self.pos += direction * self.speed * dt
+                    movement_direction = direction
+                    self.update_animation_state(movement_direction)
+
+                """
+                # Draw chase radius (for debugging)
+                screen = pygame.display.get_surface()
+                camera_offset = AllSprites().offset
+                ghost_screen_pos = self.rect.center + camera_offset
+        
+                # Draw detection ranges (comment out these lines to hide them)
+                pygame.draw.circle(screen, (255, 0, 0, 128), ghost_screen_pos, self.min_chase_distance, 1)  # Min range
+                pygame.draw.circle(screen, (255, 255, 0, 128), ghost_screen_pos, self.max_chase_distance, 1)  # Max range
+        
+                # Draw line of sight
+                pygame.draw.line(screen,
+                                 RED,
+                                 ghost_screen_pos,
+                                 self.player.rect.center + camera_offset,
+                                 2)
+                """
+            else:
+                # Wander around if can't see player
+                self.wander(dt)
+                self.update_animation_state(self.wander_direction)
 
         # Update positions and check collisions
         self.hitbox_rect.centerx = round(self.pos.x)
@@ -247,15 +372,30 @@ class Ghost(pygame.sprite.Sprite):
 class Blocks(pygame.sprite.Sprite):
     def __init__(self, pos, size, groups):
         super().__init__(groups)
-        self.image = pygame.Surface(size)
-        self.image.fill(BLUE)
+        self.block_images = {
+            'stone1': "img//env//stone1.png",
+            'stone2': "img//env//stone2.png",
+            'stone3': "img//env//stone3.png",
+            'stone4': "img//env//stone4.png",
+            'stone5': "img//env//stone5.png"
+        }
+        selected_image = random.choice(list(self.block_images.values()))
+        self.image = pygame.image.load(selected_image).convert_alpha()
+        if size != (self.image.get_width(), self.image.get_height()):
+            self.image = pygame.transform.scale(self.image, size)
         self.rect = self.image.get_rect(center = pos)
+        self.hitbox_rect = self.rect.inflate(-10, -10)
+        self.hitbox_rect.center = self.rect.center
 
 class Collectibles(pygame.sprite.Sprite):
-    def __init__(self, pos, size, groups):
+    def __init__(self, pos, groups):
         super().__init__(groups)
-        self.image = pygame.Surface(size)
-        self.image.fill(BRATGREEN)
+        self.collectible_images = {
+            'shard1': "img//env//shard1.png",
+            'shard2': "img//env//shard2.png",
+        }
+        selected_image = random.choice(list(self.collectible_images.values()))
+        self.image = pygame.image.load(selected_image).convert_alpha()
         self.rect = self.image.get_rect(center = pos)
 
 class WinZone(pygame.sprite.Sprite):
@@ -263,7 +403,7 @@ class WinZone(pygame.sprite.Sprite):
         super().__init__(groups)
         self.image = pygame.Surface(size)
         self.image.fill((255, 247, 0, 128))  # Semi-transparent green
-        self.image.set_alpha(128)  # Make it semi-transparent
+        self.image.set_alpha(32)  # Make it semi-transparent
         self.rect = self.image.get_rect(center=pos)
         self.active = True
 
@@ -276,8 +416,9 @@ class Boundary(pygame.sprite.Sprite):
 
 # Sprite grouping
 class AllSprites(pygame.sprite.Group):
-    def __init__(self):
+    def __init__(self, game):
         super().__init__()
+        self.game = game
         self.screen = pygame.display.get_surface()
         self.offset = pygame.Vector2() # Cam offset setup
 
@@ -298,9 +439,8 @@ class AllSprites(pygame.sprite.Group):
         desired_x = -(target_pos[0] - self.screen_width // 2)
         desired_y = -(target_pos[1] - self.screen_height // 2)
 
+        # Clamp camera to boundaries
         if self.game_area:
-            # Clamp camera to boundaries
-
             # Right boundary
             if desired_x < -(self.game_area['right'] - self.screen_width):
                 desired_x = -(self.game_area['right'] - self.screen_width)
@@ -317,13 +457,77 @@ class AllSprites(pygame.sprite.Group):
 
         return pygame.Vector2(desired_x, desired_y)
 
-    def draw(self, target_pos):
+    def draw(self, target_pos, **kwargs):
         """Draw sprites with clamped camera position"""
         self.offset = self.calculate_camera(target_pos)
+
+        # Draw background
+        bg_pos = self.offset
+        self.screen.blit(self.game.background_current, bg_pos)
 
         for sprite in self:
             offset_pos = sprite.rect.topleft + self.offset
             self.screen.blit(sprite.image, offset_pos)
+
+class SpriteSheet:
+    def __init__(self, sprite_obj):
+        self.sprite = sprite_obj
+        self.animations = {}
+        self.frame_index = 0
+        self.animation_speed = 5
+        self.current_animation = None
+        self.facing_right = True
+
+    def load_spritesheet(self, path, num_frames, scale=1.2):
+        """Load a spritesheet and return list of frames"""
+        spritesheet = pygame.image.load(path).convert_alpha()
+        frame_width = spritesheet.get_width() // num_frames
+        frame_height = spritesheet.get_height()
+
+        frames = []
+        for i in range(num_frames):
+            # Extract each frame from the spritesheet
+            surface = pygame.Surface((frame_width, frame_height), pygame.SRCALPHA)
+            surface.blit(spritesheet, (0, 0),
+                         (i * frame_width, 0, frame_width, frame_height))
+            scaled_surface = pygame.transform.scale(surface,
+                                                    (int(frame_width * scale),
+                                                     int(frame_height * scale)))
+            frames.append(scaled_surface)
+        return frames
+
+    def add_animation(self, name, path, num_frames, scale=1.2):
+        """Add a new animation to the animations dictionary"""
+        self.animations[name] = self.load_spritesheet(path, num_frames, scale)
+        if not self.current_animation:  # Set first added animation as default
+            self.current_animation = name
+            self.sprite.image = self.animations[name][0]
+
+    def set_animation(self, name, speed=5):
+        """Change current animation"""
+        if self.current_animation != name:
+            self.current_animation = name
+            self.frame_index = 0
+            self.animation_speed = speed
+
+    def animate(self, dt):
+        """Update animation frame"""
+        if not self.current_animation:
+            return
+
+        # Update frame index
+        self.frame_index += self.animation_speed * dt
+
+        # Reset frame index when it exceeds animation length
+        if self.frame_index >= len(self.animations[self.current_animation]):
+            self.frame_index = 0
+
+        # Update image
+        self.sprite.image = self.animations[self.current_animation][int(self.frame_index)]
+
+        # Flip sprite when changing directions
+        if not self.facing_right:
+            self.sprite.image = pygame.transform.flip(self.sprite.image, True, False)
 
 # Animated Sprites
 class AnimatedSprite(pygame.sprite.Sprite):

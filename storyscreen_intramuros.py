@@ -6,6 +6,10 @@ import time
 import math
 import pygame.mixer
 from concurrent.futures import ThreadPoolExecutor
+import os
+# Import game-related classes
+from sprites import AllSprites, Boundary, Blocks, Collectibles, Ghost, Player, WinZone
+from sprites import WIDTH, HEIGHT, BLACK, WHITE
 
 class SceneState(Enum):
     FADE_IN = auto()
@@ -64,39 +68,28 @@ class LoadingScreen:
         self.fade_speed = 5
 
     def draw_rounded_rect(self, surface, color, rect, radius):
-        """Draw a rounded rectangle"""
         x, y, width, height = rect
-        
-        # Create temporary surface for anti-aliasing
         temp_surface = pygame.Surface((width, height), pygame.SRCALPHA)
-        
-        # Draw the main rectangles
         pygame.draw.rect(temp_surface, color, 
                         (radius, 0, width - 2 * radius, height))
         pygame.draw.rect(temp_surface, color,
                         (0, radius, width, height - 2 * radius))
-        
-        # Draw the four corner circles
         pygame.draw.circle(temp_surface, color, (radius, radius), radius)
         pygame.draw.circle(temp_surface, color, (width - radius, radius), radius)
         pygame.draw.circle(temp_surface, color, (radius, height - radius), radius)
         pygame.draw.circle(temp_surface, color, (width - radius, height - radius), radius)
-        
-        # Blit the temporary surface onto the main surface
         surface.blit(temp_surface, (x, y))
     
     def update(self, progress: float):
         self.progress = progress
         self.anim_counter += 1
         
-        # Update loading dots animation
         if self.anim_counter % self.dot_update_rate == 0:
             if len(self.dots) < 3:
                 self.dots += "."
             else:
                 self.dots = ""
         
-        # Update tagalog text fade animation
         if self.tagalog_fade_in:
             self.tagalog_alpha = min(255, self.tagalog_alpha + self.fade_speed)
             if self.tagalog_alpha >= 255:
@@ -107,37 +100,30 @@ class LoadingScreen:
                 self.tagalog_fade_in = True
     
     def draw(self):
-        # Fill background
         self.screen.fill(self.bg_color)
         
-        # Draw main title
         title_text = self.font.render("ISLA", True, self.text_color)
         title_rect = title_text.get_rect(centerx=640, bottom=self.bar_y - 40)
         self.screen.blit(title_text, title_rect)
         
-        # Draw main loading message
         loading_text = self.small_font.render(self.selected_message[0], True, self.text_color)
         loading_rect = loading_text.get_rect(centerx=640, top=self.bar_y + 40)
         self.screen.blit(loading_text, loading_rect)
         
-        # Draw Tagalog message with fade effect
         tagalog_text = self.small_font.render(self.selected_message[1], True, self.highlight_color)
         tagalog_text.set_alpha(self.tagalog_alpha)
         tagalog_rect = tagalog_text.get_rect(centerx=640, top=self.bar_y + 60)
         self.screen.blit(tagalog_text, tagalog_rect)
         
-        # Draw loading bar border (rounded)
         border_rect = (self.bar_x - self.border_thickness,
                       self.bar_y - self.border_thickness,
                       self.bar_width + (self.border_thickness * 2),
                       self.bar_height + (self.border_thickness * 2))
         self.draw_rounded_rect(self.screen, self.border_color, border_rect, self.corner_radius)
         
-        # Draw loading bar background (rounded)
         bg_rect = (self.bar_x, self.bar_y, self.bar_width, self.bar_height)
         self.draw_rounded_rect(self.screen, self.bg_color, bg_rect, self.corner_radius - self.border_thickness)
         
-        # Draw loading bar progress (rounded)
         progress_width = int(self.bar_width * self.progress)
         if progress_width > 0:
             progress_rect = (self.bar_x, self.bar_y, progress_width, self.bar_height)
@@ -147,7 +133,7 @@ class LoadingScreen:
             else:
                 self.draw_rounded_rect(self.screen, self.fill_color, progress_rect, 
                                      self.corner_radius - self.border_thickness)
-                
+
 class AssetLoader:
     @staticmethod
     def load_image(path):
@@ -161,7 +147,7 @@ class AssetLoader:
         except Exception as e:
             print(f"Warning: Could not load sound {path}: {e}")
             return None
-
+        
 class Scene:
     def __init__(self, image_path: str, text: str, font: pygame.font.Font, 
                  sound_path: str = None, is_first_scene: bool = False, 
@@ -253,8 +239,14 @@ class Scene:
                     text_rect = text_surface.get_rect(midleft=(40, base_y_offset + (i * 22)))
                     screen.blit(text_surface, text_rect)
                 
-                if self.typewriter_complete and not (self.is_final_scene and self.final_text_shown):
-                    space_text = self.font.render("Press SPACE to continue", True, (255, 255, 255))
+                if self.typewriter_complete:
+                    # Different prompt for final scene after final text
+                    if self.is_final_scene and self.final_text_shown:
+                        prompt_text = "Press SPACE to Start Game"
+                    else:
+                        prompt_text = "Press SPACE to continue"
+                        
+                    space_text = self.font.render(prompt_text, True, (255, 255, 255))
                     float_offset = math.sin(self.time_active * 0.03) * 1.5
                     space_text.set_alpha(self.space_prompt_alpha)
                     space_rect = space_text.get_rect(center=(640, 695 + float_offset))
@@ -267,7 +259,7 @@ class Scene:
         self._update_audio()
         self._update_scene_state(current_time)
         
-        if self.typewriter_complete and not (self.is_final_scene and self.final_text_shown):
+        if self.typewriter_complete:
             pulse = (math.sin(self.time_active * 0.05) + 1) * 0.5
             self.space_prompt_alpha = int(100 + (155 * pulse))
 
@@ -400,6 +392,12 @@ class OpeningSequence:
         
         self.initial_fade_alpha = 255
         self.initial_fade_complete = False
+        
+        # Game transition properties
+        self.game_started = False
+        self.game_instance = None
+        self.fade_out_complete = False
+        self.fade_alpha = 0
 
     def _initialize_scenes(self) -> list:
         return [
@@ -455,12 +453,28 @@ class OpeningSequence:
                  "audio/tenth_humming.wav",
                  is_final_scene=True)
         ]
-    
+
+    def transition_to_game(self):
+        """Smooth transition to game"""
+        if not self.game_instance:
+            # Clean up current sounds
+            for scene in self.scenes:
+                if scene.sound:
+                    scene.stop_sound()
+                if scene.typewriter_sound:
+                    scene.typewriter_sound.stop()
+            
+            # Import and initialize game
+            from intramuros import Game
+            self.game_instance = Game()
+            
+            # Start the game
+            self.game_instance.run()
+
     def _preload_assets(self):
         total_assets = len(self.scenes)
         assets_loaded = 0
         
-        # Preload all assets with progress tracking
         with ThreadPoolExecutor() as executor:
             futures = []
             for scene in self.scenes:
@@ -471,7 +485,6 @@ class OpeningSequence:
                 completed = sum(1 for f in futures if f.done())
                 progress = completed / total_assets
                 
-                # Update and draw loading screen
                 self.loading_screen.update(progress)
                 self.loading_screen.draw()
                 pygame.display.flip()
@@ -481,8 +494,22 @@ class OpeningSequence:
         
         self.loading_complete = True
 
+    def fade_out(self):
+        fade_surface = pygame.Surface((1280, 720))
+        fade_surface.fill((0, 0, 0))
+        
+        while self.fade_alpha < 255:
+            self.screen.fill((0, 0, 0))
+            self.scenes[self.current_scene].render(self.screen)
+            fade_surface.set_alpha(self.fade_alpha)
+            self.screen.blit(fade_surface, (0, 0))
+            pygame.display.flip()
+            self.fade_alpha += 8
+            self.clock.tick(60)
+        
+        self.fade_out_complete = True
+
     def run(self):
-        # Show loading screen and preload assets
         self._preload_assets()
         
         running = True
@@ -501,6 +528,13 @@ class OpeningSequence:
                     if event.key == pygame.K_SPACE and self.initial_fade_complete:
                         if current_time - self.last_space_time >= self.space_cooldown:
                             current_scene = self.scenes[self.current_scene]
+                            
+                            # Check if it's the final scene and final text is shown
+                            if current_scene.is_final_scene and current_scene.final_text_shown:
+                                self.fade_out()
+                                self.transition_to_game()
+                                return
+                            
                             current_scene.space_pressed = True
                             current_scene._fade_out_typewriter()
                             if not self.transitioning:
@@ -516,22 +550,18 @@ class OpeningSequence:
             
             self.screen.fill((0, 0, 0))
             
-            # Handle the initial scene
             if not self.initial_fade_complete:
                 current_scene = self.scenes[self.current_scene]
                 current_scene.render(self.screen)
                 
-                # Apply fade overlay
                 fade_surface.set_alpha(self.initial_fade_alpha)
                 self.screen.blit(fade_surface, (0, 0))
                 
-                # Decrease fade alpha
                 self.initial_fade_alpha = max(0, self.initial_fade_alpha - 5)
                 
                 if self.initial_fade_alpha <= 0:
                     self.initial_fade_complete = True
             else:
-                # Normal scene handling
                 current_scene = self.scenes[self.current_scene]
                 current_scene.update()
                 
@@ -548,31 +578,16 @@ class OpeningSequence:
             pygame.display.flip()
             self.clock.tick(60)
         
-        for scene in self.scenes:
-            if scene.sound and not scene.is_final_scene:
-                scene.stop_sound()
-            if scene.typewriter_sound:
-                scene.typewriter_sound.stop()
-        
-        pygame.quit()
-        sys.exit()
-    
-    def fade_out(self):
-        alpha = 0
-        fade_surface = pygame.Surface((1280, 720))
-        fade_surface.fill((0, 0, 0))
-        
-        while alpha < 255:
-            self.screen.fill((0, 0, 0))
-            self.scenes[self.current_scene].render(self.screen)
-            fade_surface.set_alpha(alpha)
-            self.screen.blit(fade_surface, (0, 0))
-            pygame.display.flip()
-            alpha += 8
-            self.clock.tick(60)
+        if not self.fade_out_complete:
+            for scene in self.scenes:
+                if scene.sound:
+                    scene.stop_sound()
+                if scene.typewriter_sound:
+                    scene.typewriter_sound.stop()
+            pygame.quit()
+            sys.exit()
 
 def main():
-    # Set higher priority for the game process
     try:
         import os
         if os.name == 'nt':  # Windows
