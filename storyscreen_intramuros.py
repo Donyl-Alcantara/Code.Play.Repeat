@@ -295,9 +295,20 @@ class Scene:
         if self.is_final_scene and not self.final_text_shown:
             self.text_alpha = max(0, self.text_alpha - self.fade_speed)
             if self.text_alpha <= 0:
-                self.next_text = "History lives here. And now, so do you."
+                # First text: Context and Rules
+                self.next_text = "Context and Rules: Night shrouds Intramuros. Brave the haunted grounds to gather Agimat artifacts needed to cleanse this sacred place. The spirits roam, ready to strike—find refuge in the yellow Safe Zone to forge the Agimat and escape… or be claimed by the restless souls."
+                
+                # Second text: Controls
+                if self.current_text == self.next_text and self.typewriter_complete:
+                    self.next_text = "WASD - Movement\nLSHIFT - Sprint\nF (in the safe zone) - Craft the Agimat"
+                
+                # Final text: History lives here
+                # Final text: History lives here
+                if self.current_text == "WASD - Movement\nLSHIFT - Sprint\nF (in the safe zone) - Craft the Agimat" and self.typewriter_complete:
+                    self.next_text = "History lives here. And now, so do you."
+                    self.final_text_shown = True
+                
                 self.text = self.next_text
-                self.final_text_shown = True
                 self.state = SceneState.FADE_IN
                 self.current_text = ""
                 self.text_counter = 0
