@@ -2,6 +2,7 @@ import pygame.draw
 import random
 import math
 from settings import *
+
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos, groups, collisions, collectibles):
         super().__init__(groups)
@@ -253,8 +254,14 @@ class Ghost(pygame.sprite.Sprite):
             self.wander_timer = 0
             self.wander_interval = random.randint(2, 3)  # Randomize next interval
 
-        # Move in the wander direction
-        self.pos += self.wander_direction * (self.speed * 0.4) * dt
+        # Test if next wandering position would enter win zone
+        test_pos = self.pos + self.wander_direction * (self.speed * 0.4) * dt
+        test_rect = self.hitbox_rect.copy()
+        test_rect.center = test_pos
+
+        # Only move if wouldn't enter win zone
+        if not (self.win_zone_rect and self.win_zone_rect.colliderect(test_rect)):
+            self.pos += self.wander_direction * (self.speed * 0.4) * dt
 
     def collision(self, direction):
         for sprite in self.collision_sprites:
@@ -303,23 +310,6 @@ class Ghost(pygame.sprite.Sprite):
         # Update animation
         self.animation.animate(dt)
 
-        # Calculate distance to win zone
-        if self.win_zone_rect:
-            win_zone_center = pygame.math.Vector2(self.win_zone_rect.center)
-            ghost_pos = pygame.math.Vector2(self.pos)
-            to_win_zone = win_zone_center - ghost_pos
-            dist_to_win_zone = to_win_zone.length()
-
-            # If too close to win zone, move away
-            if dist_to_win_zone < 25:  # Buffer distance from win zone
-                if to_win_zone.length() > 0:
-                    direction = -to_win_zone.normalize()  # Move away from win zone
-                    self.pos += direction * self.speed * 0.5 * dt
-                    movement_direction = direction
-                self.update_animation_state(movement_direction)
-                self.animation.animate(dt)
-                return  # Skip normal movement logic
-
         if self.win_zone_rect and self.win_zone_rect.colliderect(self.player.rect):
             self.wander(dt)
             self.update_animation_state(self.wander_direction)
@@ -336,27 +326,17 @@ class Ghost(pygame.sprite.Sprite):
                 direction = pygame.math.Vector2(self.player.rect.center) - self.pos
                 if direction.length() > 0:
                     direction = direction.normalize()
-                    self.pos += direction * self.speed * dt
-                    movement_direction = direction
-                    self.update_animation_state(movement_direction)
+                    # Test if next position would be in win zone
+                    test_pos = self.pos + direction * self.speed * dt
+                    test_rect = self.hitbox_rect.copy()
+                    test_rect.center = test_pos
+                    
+                    # Only move if wouldn't enter win zone
+                    if not (self.win_zone_rect and self.win_zone_rect.colliderect(test_rect)):
+                        self.pos += direction * self.speed * dt
+                        movement_direction = direction
+                        self.update_animation_state(movement_direction)
 
-                """
-                # Draw chase radius (for debugging)
-                screen = pygame.display.get_surface()
-                camera_offset = AllSprites().offset
-                ghost_screen_pos = self.rect.center + camera_offset
-        
-                # Draw detection ranges (comment out these lines to hide them)
-                pygame.draw.circle(screen, (255, 0, 0, 128), ghost_screen_pos, self.min_chase_distance, 1)  # Min range
-                pygame.draw.circle(screen, (255, 255, 0, 128), ghost_screen_pos, self.max_chase_distance, 1)  # Max range
-        
-                # Draw line of sight
-                pygame.draw.line(screen,
-                                 RED,
-                                 ghost_screen_pos,
-                                 self.player.rect.center + camera_offset,
-                                 2)
-                """
             else:
                 # Wander around if can't see player
                 self.wander(dt)
@@ -395,8 +375,50 @@ class Collectibles(pygame.sprite.Sprite):
             'shard2': "img//env//shard2.png",
         }
         selected_image = random.choice(list(self.collectible_images.values()))
-        self.image = pygame.image.load(selected_image).convert_alpha()
-        self.rect = self.image.get_rect(center = pos)
+        self.base_image = pygame.image.load(selected_image).convert_alpha()
+        
+        # Create a larger surface for the glow effect
+        glow_padding = 20  # Padding for glow effect
+        self.image = pygame.Surface((self.base_image.get_width() + glow_padding*2,
+                                   self.base_image.get_height() + glow_padding*2),
+                                   pygame.SRCALPHA)
+        
+        # Create radial gradient for glow
+        self.glow_radius = max(self.base_image.get_width(), self.base_image.get_height()) // 2 + glow_padding
+        self.glow_surface = pygame.Surface((self.image.get_width(), self.image.get_height()), 
+                                         pygame.SRCALPHA)
+        
+        # Animation parameters
+        self.alpha = 0
+        self.alpha_speed = 2
+        self.alpha_direction = 1
+        self.max_alpha = 60  # Maximum glow intensity
+        
+        # Position setup
+        self.rect = self.image.get_rect(center=pos)
+    
+    def update(self, dt):
+        # Update glow alpha
+        self.alpha += self.alpha_speed * self.alpha_direction
+        if self.alpha >= self.max_alpha:
+            self.alpha_direction = -1
+        elif self.alpha <= 0:
+            self.alpha_direction = 1
+        
+        # Clear the surface
+        self.image.fill((0,0,0,0))
+        
+        # Create radial glow
+        for radius in range(self.glow_radius, 0, -1):
+            alpha = int(max(0, self.alpha * (1 - radius/self.glow_radius)))
+            pygame.draw.circle(self.glow_surface, (255, 247, 140, alpha), 
+                             (self.image.get_width()//2, self.image.get_height()//2), radius)
+        
+        # Apply glow and main image
+        self.image.blit(self.glow_surface, (0, 0))
+        self.image.blit(self.base_image, 
+                       (self.image.get_width()//2 - self.base_image.get_width()//2,
+                        self.image.get_height()//2 - self.base_image.get_height()//2))
 
 class WinZone(pygame.sprite.Sprite):
     def __init__(self, pos, size, groups):

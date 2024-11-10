@@ -21,7 +21,7 @@ class GameLauncher:
         
         # Audio setup
         try:
-            self.music = mixer.Sound("audio/mapost.mp3")
+            self.music = mixer.Sound("audio/islamapost.mp3")
             self.click_sound = mixer.Sound("audio/click.wav")
             self.click_sound.set_volume(0.5)
             self.current_volume = 0.0

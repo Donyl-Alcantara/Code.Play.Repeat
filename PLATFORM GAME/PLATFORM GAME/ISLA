@@ -1,0 +1,540 @@
+import pygame
+import random
+from os import listdir
+from os.path import isfile, join
+import os
+import json
+import time
+from datetime import datetime
+
+# Initialize pygame
+pygame.init()
+
+# Game window dimensions
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+
+# Create game window
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption('Jump to up to Mount Apo')
+
+# Set frame rate
+clock = pygame.time.Clock()
+FPS = 60
+
+# Game variables
+SCROLL_THRESH = 200
+GRAVITY = 0.9
+MAX_PLATFORMS = 15
+MAX_SCORE = 2954  # Maximum score cap
+scroll = 0
+bg_scroll = 0
+game_over = False
+fade_counter = 0
+show_leaderboard = False
+name_input_active = False
+input_box = None
+show_scoreboard = False
+
+# Define colours
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GOLD = (255, 215, 0)
+SILVER = (192, 192, 192)
+BRONZE = (205, 127, 50)
+
+# Define font
+try:
+    font_path = os.path.join('Assets', 'Fonts', 'Minecraft.ttf')
+    font_small = pygame.font.Font(font_path, 20)
+    font_big = pygame.font.Font(font_path, 24)
+    font_title = pygame.font.Font(font_path, 32)
+    font_score = pygame.font.Font(font_path, 28)
+except Exception as e:
+    print(f"Couldn't load custom font, falling back to system font: {e}")
+    font_small = pygame.font.SysFont('Arial', 20)
+    font_big = pygame.font.SysFont('Arial', 24)
+    font_title = pygame.font.SysFont('Arial', 32)
+    font_score = pygame.font.SysFont('Arial', 28)
+
+def draw_text(text, font, text_col, x, y):
+    img = font.render(text, True, text_col)
+    screen.blit(img, (x, y))
+
+# Load images
+try:
+    bg_image = pygame.image.load('Assets/Background/Blue.png').convert_alpha()
+    platform_image = pygame.image.load('Assets/Platform/Grey Off.png').convert_alpha()
+    bg_image = pygame.transform.scale(bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+except Exception as e:
+    print(f"Error loading images: {e}")
+    raise
+
+class ScoreboardScreen:
+    def __init__(self):
+        self.display_duration = 5  # Duration in seconds
+        self.start_time = None
+        self.medal_colors = {
+            'gold': GOLD,
+            'silver': SILVER,
+            'bronze': BRONZE,
+            None: WHITE
+        }
+    def show(self, score_manager):
+        if self.start_time is None:
+            self.start_time = time.time()
+            
+        # Create semi-transparent background
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.fill(BLACK)
+        overlay.set_alpha(200)
+        screen.blit(overlay, (0, 0))
+        
+        # Display congratulations message
+        draw_text("CONGRATULATIONS!", font_title, WHITE, SCREEN_WIDTH//2 - 150, 100)
+
+        # Display medal if earned
+        medal_status = score_manager.get_medal_status()
+        if medal_status:
+            medal_text = f"{medal_status.upper()} MEDAL ACHIEVED!"
+            medal_color = self.medal_colors[medal_status]
+            draw_text(medal_text, font_big, medal_color, SCREEN_WIDTH//2 - 150, 180)
+        
+        # Display final stats
+        stats_y = 250
+        draw_text(f"Final Score: {score_manager.score}", font_score, WHITE, SCREEN_WIDTH//2 - 100, stats_y)
+        draw_text(f"Time: {score_manager.get_formatted_time()}", font_score, WHITE, SCREEN_WIDTH//2 - 100, stats_y + 50)
+        
+        if score_manager.combo_count > 1:
+            draw_text(f"Highest Combo: x{score_manager.combo_multiplier:.1f}", font_score, WHITE, SCREEN_WIDTH//2 - 100, stats_y + 100)
+            
+        # Display "Mount Apo Summit" message if reached max score
+        if score_manager.score >= MAX_SCORE:
+            draw_text("You've reached Mount Apo's Summit!", font_big, GOLD, SCREEN_WIDTH//2 - 200, stats_y + 150)
+        
+        # Show press space message
+        if time.time() - self.start_time > 1:  # Start blinking after 1 second
+            if int(time.time() * 2) % 2:  # Blink every 0.5 seconds
+                draw_text("Press SPACE to view leaderboard", font_small, WHITE, SCREEN_WIDTH//2 - 150, SCREEN_HEIGHT - 100)
+        
+        # Check if display duration has elapsed
+        return time.time() - self.start_time >= self.display_duration
+
+# Create scoreboard screen instance
+scoreboard_screen = ScoreboardScreen()
+
+class ScoreManager:
+    def __init__(self):
+        self.score = 0
+        self.highest_point = 0
+        self.max_score = MAX_SCORE
+        self.height_multiplier = 0.1
+        self.combo_multiplier = 1.0
+        self.combo_count = 0
+        self.last_platform_y = 0
+        self.medal_thresholds = {
+            'bronze': 500,
+            'silver': 1500,
+            'gold': 2954
+        }
+    
+    def get_medal_status(self):
+        if self.score >= self.medal_thresholds['gold']:
+            return 'gold'
+        elif self.score >= self.medal_thresholds['silver']:
+            return 'silver'
+        elif self.score >= self.medal_thresholds['bronze']:
+            return 'bronze'
+        return None
+
+class TimeBasedScoreManager(ScoreManager):
+    def __init__(self):
+        super().__init__()
+        self.start_time = time.time()
+        self.completion_time = 0
+        self.time_penalty_rate = 2
+        self.quick_completion_bonus = 100  # Reduced bonus to match new scoring scale
+        self.quick_completion_threshold = 60
+        self.leaderboard_file = "leaderboard.json"
+        self.leaderboard = self.load_leaderboard()
+        self.points_per_platform = 20
+        self.platforms_reached = set()  # Track unique platforms reached
+
+    def load_leaderboard(self):
+        try:
+            with open(self.leaderboard_file, 'r') as file:
+                return json.load(file)
+        except FileNotFoundError:
+            return []
+
+    def save_leaderboard(self):
+        with open(self.leaderboard_file, 'w') as file:
+            json.dump(self.leaderboard, file)
+
+    def update_score(self, player_y, current_scroll, platform_hit=False):
+        # Only update score when a new platform is hit
+        if platform_hit:
+            platform_id = f"{player_y + current_scroll}"  # Create unique identifier for platform
+            if platform_id not in self.platforms_reached:
+                self.platforms_reached.add(platform_id)
+                self.add_points(self.points_per_platform)
+                
+                # Update combo system
+                self.combo_count += 1
+                self.combo_multiplier = min(1.0 + (self.combo_count * 0.1), 1.5)
+                combo_bonus = int(self.points_per_platform * (self.combo_multiplier - 1))
+                if combo_bonus > 0:
+                    self.add_points(combo_bonus)
+
+    def add_points(self, points):
+        self.score = min(self.score + points, self.max_score)
+        if self.score >= self.max_score:
+            self.completion_time = time.time() - self.start_time
+            if self.completion_time <= self.quick_completion_threshold:
+                self.score = min(self.score + self.quick_completion_bonus, self.max_score)
+            else:
+                time_penalty = int((self.completion_time - self.quick_completion_threshold) * self.time_penalty_rate)
+                self.score = max(0, self.score - time_penalty)
+
+    def add_to_leaderboard(self, player_name):
+        entry = {
+            "name": player_name,
+            "score": self.score,
+            "time": self.completion_time,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        self.leaderboard.append(entry)
+        self.leaderboard.sort(key=lambda x: (-x["score"], x["time"]))
+        self.leaderboard = self.leaderboard[:10]
+        self.save_leaderboard()
+
+    def reset(self):
+        self.score = 0
+        self.combo_multiplier = 1.0
+        self.combo_count = 0
+        self.start_time = time.time()
+        self.completion_time = 0
+        self.platforms_reached.clear()
+
+    def get_formatted_time(self):
+        current_time = time.time() - self.start_time if not game_over else self.completion_time
+        minutes = int(current_time // 60)
+        seconds = int(current_time % 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+def draw_leaderboard(screen, font_small, font_big):
+    # Create semi-transparent overlay
+    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+    overlay.fill(BLACK)
+    overlay.set_alpha(200)
+    screen.blit(overlay, (0, 0))
+    
+    # Draw leaderboard content
+    leaderboard_x = SCREEN_WIDTH // 2 - 150
+    leaderboard_y = 50
+
+    draw_text("LEADERBOARD", font_big, WHITE, leaderboard_x, leaderboard_y)
+    
+    
+    y_offset = 60
+    for i, entry in enumerate(score_manager.leaderboard, 1):
+        text = f"{i}. {entry['name']}: {entry['score']}"
+        time_text = f"Time: {int(entry['time'] // 60)}:{int(entry['time'] % 60):02d}"
+        draw_text(text, font_small, WHITE, leaderboard_x, leaderboard_y + y_offset)
+        draw_text(time_text, font_small, WHITE, leaderboard_x, leaderboard_y + y_offset + 20)
+        y_offset += 50
+
+class InputBox:
+    def __init__(self, x, y, width, height, font):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.color = pygame.Color('lightgray')
+        self.text = ''
+        self.font = font
+        self.txt_surface = font.render(self.text, True, self.color)
+        self.active = False
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.rect.collidepoint(event.pos):
+                self.active = True
+            else:
+                self.active = False
+            self.color = pygame.Color('white') if self.active else pygame.Color('lightgray')
+        
+        if event.type == pygame.KEYDOWN:
+            if self.active:
+                if event.key == pygame.K_RETURN:
+                    return self.text
+                elif event.key == pygame.K_BACKSPACE:
+                    self.text = self.text[:-1]
+                else:
+                    if len(self.text) < 10:
+                        self.text += event.unicode
+                self.txt_surface = self.font.render(self.text, True, self.color)
+        return None
+
+    def draw(self, screen):
+        screen.blit(self.txt_surface, (self.rect.x + 5, self.rect.y + 5))
+        pygame.draw.rect(screen, self.color, self.rect, 2)
+
+def flip(sprites):
+    return [pygame.transform.flip(sprite, True, False) for sprite in sprites]
+
+def load_sprite_sheets(dir1, dir2, width, height, direction=False):
+    path = join("Assets", dir1, dir2)
+    images = [f for f in listdir(path) if f.endswith('.png')]
+    all_sprites = {}
+
+    for image in images:
+        try:
+            sprite_sheet = pygame.image.load(join(path, image)).convert_alpha()
+            sprites = []
+            
+            for i in range(sprite_sheet.get_width() // width):
+                surface = pygame.Surface((width, height), pygame.SRCALPHA, 32)
+                rect = pygame.Rect(i * width, 0, width, height)
+                surface.blit(sprite_sheet, (0, 0), rect)
+                sprites.append(pygame.transform.scale2x(surface))
+
+            if direction:
+                all_sprites[image.replace(".png", "") + "_right"] = sprites
+                all_sprites[image.replace(".png", "") + "_left"] = flip(sprites)
+            else:
+                all_sprites[image.replace(".png", "")] = sprites
+        except Exception as e:
+            print(f"Error processing {image}: {e}")
+
+    return all_sprites
+
+def draw_bg(bg_scroll):
+    screen.blit(bg_image, (0, 0 + bg_scroll))
+    screen.blit(bg_image, (0, -600 + bg_scroll))
+
+class Player():
+    def __init__(self, x, y):
+        self.ANIMATION_DELAY = 3
+        self.PLAYER_WIDTH = 32
+        self.PLAYER_HEIGHT = 32
+        
+        self.rect = pygame.Rect(0, 0, self.PLAYER_WIDTH, self.PLAYER_HEIGHT)
+        self.rect.center = (x, y)
+        self.vel_y = 0
+        self.flip = False
+        self.initial_height = y
+        
+        try:
+            self.sprites = load_sprite_sheets("MainCharacters", "MaskDude", self.PLAYER_WIDTH, self.PLAYER_HEIGHT, True)
+        except Exception as e:
+            print(f"Error loading player sprites: {e}")
+            self.sprites = None
+            
+        self.animation_count = 0
+        self.fall_count = 0
+        self.jumping = False
+        self.running = False
+        self.state = "idle"
+        self.facing_right = True
+        self.current_sprite = 0
+
+    def get_sprite_sheet(self):
+        if not self.sprites:
+            return None
+        sprite_sheet_name = self.state + ("_right" if self.facing_right else "_left")
+        return self.sprites.get(sprite_sheet_name, self.sprites.get("idle_right", []))
+
+    def move(self):
+        scroll = 0
+        dx = 0
+        dy = 0
+
+        key = pygame.key.get_pressed()
+        if key[pygame.K_a]:
+            dx = -12
+            self.facing_right = False
+            self.running = True
+            self.state = "run"
+        elif key[pygame.K_d]:
+            dx = 12
+            self.facing_right = True
+            self.running = True
+            self.state = "run"
+        else:
+            self.running = False
+            self.state = "idle"
+
+        self.vel_y += GRAVITY
+        dy += self.vel_y
+
+        if self.vel_y > 0:
+            self.state = "fall"
+        elif self.vel_y < 0:
+            self.state = "jump"
+
+        if self.rect.left + dx < 0:
+            dx = -self.rect.left
+        if self.rect.right + dx > SCREEN_WIDTH:
+            dx = SCREEN_WIDTH - self.rect.right
+
+        for platform in platform_group:
+            if platform.rect.colliderect(self.rect.x, self.rect.y + dy, self.PLAYER_WIDTH, self.PLAYER_HEIGHT):
+                if self.rect.bottom < platform.rect.centery:
+                    if self.vel_y > 0:
+                        self.rect.bottom = platform.rect.top
+                        dy = 0
+                        self.vel_y = -20
+                        self.jumping = True
+                        if not platform.was_hit:
+                            score_manager.update_score(self.rect.y, bg_scroll, True)
+                            platform.was_hit = True
+
+        if self.rect.top <= SCROLL_THRESH:
+            if self.vel_y < 0:
+                scroll = -dy
+
+        self.rect.x += dx
+        self.rect.y += dy + scroll
+
+        score_manager.update_score(self.rect.y, bg_scroll)
+
+        self.animation_count += 1
+        if self.animation_count >= self.ANIMATION_DELAY:
+            self.animation_count = 0
+            sprite_sheet = self.get_sprite_sheet()
+            if sprite_sheet:
+                self.current_sprite = (self.current_sprite + 1) % len(sprite_sheet)
+
+        return scroll
+
+    def draw(self):
+        sprite_sheet = self.get_sprite_sheet()
+        if sprite_sheet and len(sprite_sheet) > 0:
+            current_sprite = sprite_sheet[self.current_sprite % len(sprite_sheet)]
+            sprite_rect = current_sprite.get_rect(center=self.rect.center)
+            screen.blit(current_sprite, sprite_rect)
+        else:
+            pygame.draw.rect(screen, (255, 0, 0), self.rect)
+
+class Platform(pygame.sprite.Sprite):
+    def __init__(self, x, y, width):
+        pygame.sprite.Sprite.__init__(self)
+        # Calculate height while maintaining aspect ratio
+        height = int((platform_image.get_height() / platform_image.get_width()) * width)
+        self.image = pygame.transform.scale(platform_image, (width, height))
+        self.rect = self.image.get_rect()
+        self.rect.x = x
+        self.rect.y = y
+        self.was_hit = False
+        self.start_y = y  # Store initial y position for movement
+
+    def update(self, scroll):
+        # Update platform position with scroll
+        self.rect.y += scroll
+        
+        # Remove platform if it moves off screen
+        if self.rect.top > SCREEN_HEIGHT:
+            self.kill()
+
+# Game loop implementation
+score_manager = TimeBasedScoreManager()
+jumpy = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 150)
+platform_group = pygame.sprite.Group()
+
+# Create starting platform
+platform = Platform(SCREEN_WIDTH // 2 - 50, SCREEN_HEIGHT - 50, 100)
+platform_group.add(platform)
+input_box = None
+run = True
+
+while run:
+    clock.tick(FPS)
+    
+    # Event handling at the start of the loop
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            run = False
+        if game_over and name_input_active and input_box:
+            name = input_box.handle_event(event)
+            if name:
+                score_manager.add_to_leaderboard(name)
+                name_input_active = False
+                show_scoreboard = True
+                scoreboard_screen.start_time = None
+        
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                if show_scoreboard:
+                    show_scoreboard = False
+                    show_leaderboard = True
+                elif show_leaderboard:
+                    # Reset game state
+                    game_over = False
+                    scroll = 0
+                    bg_scroll = 0
+                    fade_counter = 0
+                    show_leaderboard = False
+                    show_scoreboard = False
+                    name_input_active = False
+                    input_box = None
+                    
+                    # Reset score manager
+                    score_manager.reset()
+                    
+                    # Reset player position
+                    jumpy.rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 150)
+                    jumpy.vel_y = 0
+                    
+                    # Reset platforms
+                    platform_group.empty()
+                    platform = Platform(SCREEN_WIDTH // 2 - 50, SCREEN_HEIGHT - 50, 100)
+                    platform_group.add(platform)
+
+    if not game_over:
+        # Normal gameplay code remains the same
+        bg_scroll += scroll
+        if bg_scroll >= 600:
+            bg_scroll = 0
+        draw_bg(bg_scroll)
+
+        if len(platform_group) < MAX_PLATFORMS:
+            platform_width = random.randint(80, 120)
+            platform_x = random.randint(0, SCREEN_WIDTH - platform_width)
+            highest_platform = min([p.rect.y for p in platform_group]) if platform_group else SCREEN_HEIGHT
+            platform_y = highest_platform - random.randint(80, 100)
+            new_platform = Platform(platform_x, platform_y, platform_width)
+            platform_group.add(new_platform)
+
+        scroll = jumpy.move()
+        platform_group.update(scroll)
+
+        platform_group.draw(screen)
+        jumpy.draw()
+
+        draw_text(f'SCORE: {score_manager.score}', font_small, WHITE, 10, 10)
+        if score_manager.combo_count > 1:
+            draw_text(f'COMBO: x{score_manager.combo_multiplier:.1f}', font_small, WHITE, 10, 30)
+        draw_text(f'TIME: {score_manager.get_formatted_time()}', font_small, WHITE, 10, 70)
+
+        if jumpy.rect.top > SCREEN_HEIGHT:
+            game_over = True
+            name_input_active = True
+            input_box = InputBox(SCREEN_WIDTH//2 - 100, 400, 200, 30, font_small)
+
+    else:  # Game over state
+        screen.fill(BLACK)
+        
+        if name_input_active and input_box:
+            # Draw name input screen
+            draw_text("Enter your name:", font_small, WHITE, SCREEN_WIDTH//2 - 100, 370)
+            input_box.draw(screen)
+        
+        elif show_scoreboard:
+            if scoreboard_screen.show(score_manager):
+                draw_text("Press SPACE to view leaderboard", font_small, WHITE, SCREEN_WIDTH//2 - 150, SCREEN_HEIGHT - 100)
+            
+        elif show_leaderboard:
+            draw_leaderboard(screen, font_small, font_big)
+            draw_text("Press SPACE to play again", font_small, WHITE, SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 50)
+
+    pygame.display.update()
+
+pygame.quit()

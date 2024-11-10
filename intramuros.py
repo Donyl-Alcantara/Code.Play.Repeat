@@ -25,6 +25,11 @@ class Game:
         self.restart_prompt_timer = 0
         self.restart_prompt_interval = 1.0  # Blink interval in seconds
         self.transitioning_to_map = False
+        
+        # Add fade in effect variables
+        self.fade_alpha = 255  # Start fully black
+        self.fade_speed = 5    # Speed of fade
+        self.fading_in = True  # Control fade in state
 
         # Sprite groups
         self.all_sprites = AllSprites(self)
@@ -108,6 +113,10 @@ class Game:
         self.restart_prompt_visible = False
         self.restart_prompt_timer = 0
         self.bg_music_playing = False
+        
+        # Reset fade in effect
+        self.fade_alpha = 255
+        self.fading_in = True
 
         # Define and create game boundary
         self.game_area = {
@@ -231,13 +240,29 @@ class Game:
                 print(f"Warning: Could not place collectible after {attempts_per_collectible} attempts")
 
     def spawn_blocks(self):
-        """Spawn blocks within game boundaries"""
+        """Spawn blocks within game boundaries but not in win zone"""
+        # Create test rect for win zone area
+        win_zone_rect = pygame.Rect(
+            self.game_area['right'] // 2 - 100,  # x position (center - half width)
+            self.game_area['bottom'] // 2 - 100,  # y position (center - half height)
+            200,  # width (matching win zone size)
+            200   # height (matching win zone size)
+        )
+        
         for _ in range(40):
-            x = randint(self.game_area['left'] + 64, self.game_area['right'] - 64)
-            y = randint(self.game_area['top'] + 64, self.game_area['bottom'] - 64)
-            w, h = randint(32, 80), randint(32, 80)
-            Blocks((x, y), (w, h),
-                  (self.all_sprites, self.collision_sprites))
+            valid_position = False
+            while not valid_position:
+                x = randint(self.game_area['left'] + 64, self.game_area['right'] - 64)
+                y = randint(self.game_area['top'] + 64, self.game_area['bottom'] - 64)
+                w, h = randint(32, 80), randint(32, 80)
+                
+                # Create test rect for the potential block
+                test_rect = pygame.Rect(x - w//2, y - h//2, w, h)
+                
+                # Check if block would overlap with win zone area
+                if not win_zone_rect.colliderect(test_rect):
+                    valid_position = True
+                    Blocks((x, y), (w, h), (self.all_sprites, self.collision_sprites))
 
     def load_gif_frames(self, gif_path, scale=1):
         frames = []
@@ -342,26 +367,65 @@ class Game:
                     text_rect = countdown_text.get_rect(center=(WIDTH // 2, HEIGHT // 4))
                     self.screen.blit(countdown_text, text_rect)
 
+            # Handle fade in effect
+            if self.fading_in:
+                fade_surface = pygame.Surface((WIDTH, HEIGHT))
+                fade_surface.fill((0, 0, 0))
+                fade_surface.set_alpha(self.fade_alpha)
+                self.screen.blit(fade_surface, (0, 0))
+                
+                self.fade_alpha = max(0, self.fade_alpha - self.fade_speed)
+                if self.fade_alpha <= 0:
+                    self.fading_in = False
+
             pygame.display.flip()
 
         pygame.quit()
 
     def transition_to_map(self):
-        pygame.quit()
-        map_path = os.path.join('map.py')
-        if os.path.exists(map_path):
-            try:
-                # Start the map.py script
-                if sys.platform == 'win32':
-                    python_executable = 'python'
-                else:
-                    python_executable = 'python3'
-                subprocess.Popen([python_executable, map_path])
-                self.running = False
-            except Exception as e:
-                print(f"Error launching map: {e}")
-        else:
-            print(f"Map file not found at: {map_path}")
+        # Create fade out effect
+        fade_surface = pygame.Surface((WIDTH, HEIGHT))
+        fade_surface.fill((0, 0, 0))
+        fade_alpha = 0
+        fade_speed = 5
+
+        # Fade out loop
+        while fade_alpha < 255:
+            # Handle any quit events during transition
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+            # Draw current game state
+            if self.player_won:
+                victory_pos = self.all_sprites.offset
+                self.screen.blit(self.background_current, victory_pos)
+                self.all_sprites.draw(self.player.rect.center)
+                self.win_text = self.font.render("You have purified the museum!", True, WHITE)
+                self.screen.blit(self.win_text, (WIDTH // 4 + 100, HEIGHT // 2 - 150))
+                self.screen.blit(self.win_img, (WIDTH // 4 + 300, HEIGHT // 4 - 100))
+
+            # Draw fade overlay
+            fade_surface.set_alpha(fade_alpha)
+            self.screen.blit(fade_surface, (0, 0))
+            pygame.display.flip()
+            
+            fade_alpha += fade_speed
+            self.clock.tick(60)
+
+        # Stop all sounds
+        pygame.mixer.music.stop()
+        pygame.mixer.stop()
+
+        # Import and start map
+        import map
+        try:
+            self.running = False
+            map.main()
+        except Exception as e:
+            print(f"Error transitioning to map: {e}")
+            self.running = False
 
     def check_win_zone(self):
         # Check if player is in win zone
@@ -479,7 +543,7 @@ class Game:
             self.initialize_game()
 
     def handle_win_transition(self):
-        pass  # You can add any additional transition effects here if desired
+        pass 
 
 if __name__ == '__main__':
     game = Game()
